@@ -3,6 +3,7 @@ import express from "express";
 import helmet from "helmet";
 import cors from "cors";
 import rateLimit from "express-rate-limit";
+import { authRouter } from "./modules/auth/authRoutes.js";
 
 const app = express();
 
@@ -18,7 +19,10 @@ const globalLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   max: 100,
 });
+
 app.use(globalLimiter);
+app.use("/auth", authRouter);
+
 
 app.get("/health", (req, res) => {
   res.json({ status: "ok" });
