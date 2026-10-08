@@ -1,8 +1,8 @@
 import { Router } from "express";
 import { registerUser, loginUser } from "./authController.js";
-import { registerLimiter } from "../../middleware/rateLimiter.js";
+import { registerLimiter, loginRateLimit } from "../../middleware/rateLimiter.js";
 
 export const authRouter = Router();
 
 authRouter.post("/register", registerLimiter, registerUser);
-authRouter.post("/login", loginUser);
+authRouter.post("/login",loginRateLimit, loginUser,);
