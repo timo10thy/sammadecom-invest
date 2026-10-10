@@ -9,7 +9,7 @@ import {
 } from "./authTokens.js";
 
 
-
+//create
 export const registerUser = async (req: Request, res: Response) => {
   try {
     const body = req.body ?? {};
@@ -145,3 +145,110 @@ export const loginUser = async (req: Request, res: Response) => {
       .json({ status: "error", message: "Something went wrong" });
   }
 };
+
+// refresh
+
+export const refreshAccessToken = async (req: Request, res: Response) => {
+  try {
+    const refreshToken = req.cookies?.["refreshToken"];
+
+    if (typeof refreshToken !== "string" || refreshToken === "") {
+      return res
+        .status(401)
+        .json({ status: "fail", message: "Invalid or expired token" });
+    }
+
+    const stored = await prisma.refreshToken.findUnique({
+      where: { tokenHash: hashToken(refreshToken) },
+      include: { user: { select: { id: true, role: true } } },
+    });
+
+    if (!stored) {
+      res.clearCookie("refreshToken", { path: "/auth" });
+      return res
+        .status(401)
+        .json({ status: "fail", message: "Invalid or expired token" });
+    }
+
+    if (stored.expiresAt <= new Date()) {
+      res.clearCookie("refreshToken", { path: "/auth" });
+      return res
+        .status(401)
+        .json({ status: "fail", message: "Invalid or expired token" });
+    }
+
+    
+    const marked = await prisma.refreshToken.updateMany({
+      where: { id: stored.id, usedAt: null },
+      data: { usedAt: new Date() },
+    });
+
+    if (marked.count === 0) {
+     
+      await prisma.refreshToken.deleteMany({ where: { userId: stored.userId } });
+      res.clearCookie("refreshToken", { path: "/auth" });
+      return res
+        .status(401)
+        .json({ status: "fail", message: "Invalid or expired token" });
+    }
+
+    const newRefreshToken = generateRefreshToken();
+
+    await prisma.refreshToken.create({
+      data: {
+        tokenHash: hashToken(newRefreshToken),
+        userId: stored.userId,
+        expiresAt: new Date(Date.now() + REFRESH_TOKEN_MAX_AGE_MS),
+      },
+    });
+
+    const accessToken = signAccessToken({
+      userId: stored.user.id,
+      role: stored.user.role,
+    });
+
+    res.cookie("refreshToken", newRefreshToken, {
+      httpOnly: true,
+      secure: process.env["NODE_ENV"] === "production",
+      sameSite: "strict",
+      path: "/auth",
+      maxAge: REFRESH_TOKEN_MAX_AGE_MS,
+    });
+
+    return res.status(200).json({
+      status: "success",
+      data: { accessToken },
+    });
+  } catch (error) {
+    console.error("Refresh failed:", error);
+    return res
+      .status(500)
+      .json({ status: "error", message: "Something went wrong" });
+  }
+};
+
+// logout
+
+export const logoutUser = async (req: Request, res: Response) => {
+  try {
+    const refreshToken = req.cookies?.["refreshToken"];
+
+    if (typeof refreshToken === "string" && refreshToken !== "") {
+      await prisma.refreshToken.deleteMany({
+        where: { tokenHash: hashToken(refreshToken) },
+      });
+    }
+
+    res.clearCookie("refreshToken", { path: "/auth" });
+    return res
+      .status(200)
+      .json({ status: "success", message: "Logged out" });
+  } catch (error) {
+    console.error("Logout failed:", error);
+    return res
+      .status(500)
+      .json({ status: "error", message: "Something went wrong" });
+  }
+};
+
+
