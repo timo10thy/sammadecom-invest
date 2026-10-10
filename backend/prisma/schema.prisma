@@ -129,4 +129,6 @@ model RefreshToken {
 
   @@index([expiresAt])
   @@index([userId])
+
+  usedAt    DateTime?
 }
