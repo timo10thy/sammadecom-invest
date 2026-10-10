@@ -94,3 +94,33 @@ export const validateRegisterInput = (
     validatePassword(password)
   );
 };
+
+export const CREATABLE_ROLES = ["STAFF", "FINANCE", "MANAGEMENT"] as const;
+export type CreatableRole = (typeof CREATABLE_ROLES)[number];
+
+export const isCreatableRole = (role: unknown): role is CreatableRole => {
+  return (
+    typeof role === "string" &&
+    (CREATABLE_ROLES as readonly string[]).includes(role)
+  );
+};
+
+export const validateCreateUserInput = (
+  body: Record<string, unknown>
+): string | null => {
+  const { name, email, role, password } = body;
+
+  if (
+    typeof name !== "string" ||
+    typeof email !== "string" ||
+    typeof password !== "string"
+  ) {
+    return "Name, email, role and password are required";
+  }
+
+  if (!isCreatableRole(role)) {
+    return "Role must be STAFF, FINANCE or MANAGEMENT";
+  }
+
+  return validateName(name) ?? validateEmail(email) ?? validatePassword(password);
+};
