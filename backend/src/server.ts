@@ -5,6 +5,7 @@ import cors from "cors";
 import cookieParser from "cookie-parser";
 import rateLimit from "express-rate-limit";
 import { authRouter } from "./modules/auth/authRoutes.js";
+import { startTokenCleanupJob } from "./jobs/tokenCleanup.js";
 
 const app = express();
 
@@ -34,4 +35,5 @@ const PORT = process.env.PORT || 5001;
 
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
+  startTokenCleanupJob();
 });
