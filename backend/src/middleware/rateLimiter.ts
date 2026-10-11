@@ -72,3 +72,17 @@ export const loginRateLimit = async (
     next(error);
   }
 };
+
+export const changePasswordLimiter = rateLimit({
+  windowMs: 60 * MINUTE,
+  limit: 5,
+  standardHeaders: "draft-8",
+  legacyHeaders: false,
+  skipSuccessfulRequests: true,
+  keyGenerator: (req: Request): string =>
+    req.user?.userId ?? ipKeyGenerator(req.ip ?? ""),
+  message: {
+    status: "fail",
+    message: "Too many attempts, please try again later",
+  },
+});
