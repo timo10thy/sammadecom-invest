@@ -28,6 +28,12 @@ enum PaymentStatus {
   PROCESSED
 }
 
+enum InvestorStatus {
+  PENDING
+  VERIFIED
+  REJECTED
+}
+
 model User {
   id           String   @id @default(uuid())
   email        String   @unique
@@ -41,19 +47,22 @@ model User {
   submittedPayments Payment[] @relation("SubmittedBy")
   approvedPayments  Payment[] @relation("ApprovedBy")
   auditLogs         AuditLog[]
+  refreshTokens RefreshToken[]
 }
 
 model Investor {
   id     String @id @default(uuid())
   userId String @unique
   user   User   @relation(fields: [userId], references: [id])
+  status InvestorStatus @default(PENDING)
+
 
   phone   String
-  address String
+  address String?
 
-  bankAccountEncrypted String
-  bankAccountLast4     String
-  bankName             String
+  bankAccountEncrypted String?
+  bankAccountLast4     String?
+  bankName             String?
 
   investments Investment[]
 
@@ -108,4 +117,18 @@ model AuditLog {
   entityId   String
 
   createdAt DateTime @default(now())
+}
+
+model RefreshToken {
+  id        String   @id @default(uuid())
+  tokenHash String   @unique
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  @@index([expiresAt])
+  @@index([userId])
+
+  usedAt    DateTime?
 }
