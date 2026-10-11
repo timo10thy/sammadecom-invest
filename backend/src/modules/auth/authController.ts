@@ -4,6 +4,7 @@ import { prisma } from "../../config/prisma.js";
 import {
   validateRegisterInput,
   validateCreateUserInput,
+  validatePassword,
 } from "./authValidation.js";
 import type { CreatableRole } from "./authValidation.js";
 import {
@@ -315,6 +316,78 @@ export const createUser = async (req: Request, res: Response) => {
         .json({ status: "fail", message: "Email already registered" });
     }
     console.error("Create user failed:", error);
+    return res
+      .status(500)
+      .json({ status: "error", message: "Something went wrong" });
+  }
+};
+
+// change password
+
+export const changePassword = async (req: Request, res: Response) => {
+  try {
+    const userId = req.user?.userId;
+    if (!userId) {
+      return res
+        .status(401)
+        .json({ status: "fail", message: "Invalid or expired token" });
+    }
+
+    const { currentPassword, newPassword } = req.body ?? {};
+
+    if (typeof currentPassword !== "string" || typeof newPassword !== "string") {
+      return res.status(400).json({
+        status: "fail",
+        message: "Current password and new password are required",
+      });
+    }
+
+    const passwordError = validatePassword(newPassword);
+    if (passwordError) {
+      return res.status(400).json({ status: "fail", message: passwordError });
+    }
+
+    if (currentPassword === newPassword) {
+      return res.status(400).json({
+        status: "fail",
+        message: "New password must be different from the current password",
+      });
+    }
+
+    const user = await prisma.user.findUnique({ where: { id: userId } });
+    if (!user) {
+      return res
+        .status(401)
+        .json({ status: "fail", message: "Invalid or expired token" });
+    }
+
+    const passwordMatches = await bcrypt.compare(
+      currentPassword,
+      user.passwordHash
+    );
+    if (!passwordMatches) {
+      return res
+        .status(400)
+        .json({ status: "fail", message: "Current password is incorrect" });
+    }
+
+    const newPasswordHash = await bcrypt.hash(newPassword, 12);
+
+    await prisma.$transaction([
+      prisma.user.update({
+        where: { id: userId },
+        data: { passwordHash: newPasswordHash },
+      }),
+      prisma.refreshToken.deleteMany({ where: { userId } }),
+    ]);
+
+    res.clearCookie("refreshToken", { path: "/auth" });
+    return res.status(200).json({
+      status: "success",
+      message: "Password changed. Please log in again",
+    });
+  } catch (error) {
+    console.error("Change password failed:", error);
     return res
       .status(500)
       .json({ status: "error", message: "Something went wrong" });
