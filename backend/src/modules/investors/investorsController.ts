@@ -110,3 +110,97 @@ export const reviewInvestor = async (req: Request, res: Response) => {
       .json({ status: "error", message: "Something went wrong" });
   }
 };
+
+//get all investors
+const parseWholeNumber = (value: unknown): number | null => {
+  if (typeof value !== "string" || value === "") {
+    return null;
+  }
+  const allDigits = value.split("").every((c) => c >= "0" && c <= "9");
+  if (!allDigits) {
+    return null;
+  }
+  const num = Number(value);
+  if (!Number.isSafeInteger(num) || num < 1) {
+    return null;
+  }
+  return num;
+};
+
+export const listInvestors = async (req: Request, res: Response) => {
+  try {
+    let statusFilter: "PENDING" | "VERIFIED" | "REJECTED" | undefined;
+    const rawStatus = req.query["status"];
+    if (rawStatus !== undefined) {
+      if (
+        rawStatus !== "PENDING" &&
+        rawStatus !== "VERIFIED" &&
+        rawStatus !== "REJECTED"
+      ) {
+        return res
+          .status(400)
+          .json({ status: "fail", message: "Invalid status" });
+      }
+      statusFilter = rawStatus;
+    }
+
+    let page = 1;
+    const rawPage = req.query["page"];
+    if (rawPage !== undefined) {
+      const parsed = parseWholeNumber(rawPage);
+      if (parsed === null) {
+        return res.status(400).json({
+          status: "fail",
+          message: "Page must be a whole number above 0",
+        });
+      }
+      page = parsed;
+    }
+
+    let limit = 20;
+    const rawLimit = req.query["limit"];
+    if (rawLimit !== undefined) {
+      const parsed = parseWholeNumber(rawLimit);
+      if (parsed === null) {
+        return res.status(400).json({
+          status: "fail",
+          message: "Limit must be a whole number above 0",
+        });
+      }
+      limit = Math.min(parsed, 50);
+    }
+
+    const where = statusFilter === undefined ? {} : { status: statusFilter };
+
+    const [total, investors] = await Promise.all([
+      prisma.investor.count({ where }),
+      prisma.investor.findMany({
+        where,
+        orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+        skip: (page - 1) * limit,
+        take: limit,
+        select: {
+          id: true,
+          phone: true,
+          status: true,
+          createdAt: true,
+          reviewedAt: true,
+          rejectionReason: true,
+          bankName: true,
+          bankAccountLast4: true,
+          user: { select: { name: true, email: true } },
+        },
+      }),
+    ]);
+
+    return res.status(200).json({
+      status: "success",
+      data: { investors, total, page, limit },
+    });
+  } catch (error) {
+    console.error("List investors failed:", error);
+    return res
+      .status(500)
+      .json({ status: "error", message: "Something went wrong" });
+  }
+};
