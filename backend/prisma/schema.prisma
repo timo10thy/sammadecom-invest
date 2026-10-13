@@ -43,19 +43,24 @@ model User {
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
-  investorProfile   Investor?
-  submittedPayments Payment[] @relation("SubmittedBy")
-  approvedPayments  Payment[] @relation("ApprovedBy")
+  investorProfile   Investor?      @relation("InvestorUser")
+  reviewedInvestors Investor[]     @relation("InvestorReviewedBy")
+  submittedPayments Payment[]      @relation("SubmittedBy")
+  approvedPayments  Payment[]      @relation("ApprovedBy")
   auditLogs         AuditLog[]
-  refreshTokens RefreshToken[]
+  refreshTokens     RefreshToken[]
 }
 
 model Investor {
-  id     String @id @default(uuid())
-  userId String @unique
-  user   User   @relation(fields: [userId], references: [id])
+  id     String         @id @default(uuid())
+  userId String         @unique
+  user   User           @relation("InvestorUser", fields: [userId], references: [id])
   status InvestorStatus @default(PENDING)
 
+  reviewedById    String?
+  reviewedBy      User?     @relation("InvestorReviewedBy", fields: [reviewedById], references: [id])
+  reviewedAt      DateTime?
+  rejectionReason String?
 
   phone   String
   address String?
