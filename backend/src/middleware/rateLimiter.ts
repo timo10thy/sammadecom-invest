@@ -86,3 +86,20 @@ export const changePasswordLimiter = rateLimit({
     message: "Too many attempts, please try again later",
   },
 });
+
+//
+export const updateProfileLimiter = rateLimit({
+  windowMs: 60 * MINUTE,
+  limit: 5,
+  standardHeaders: "draft-8",
+  legacyHeaders: false,
+  skipSuccessfulRequests: true,
+  requestWasSuccessful: (_req: Request, res: Response): boolean =>
+    res.locals["passwordFailed"] !== true,
+  keyGenerator: (req: Request): string =>
+    req.user?.userId ?? ipKeyGenerator(req.ip ?? ""),
+  message: {
+    status: "fail",
+    message: "Too many attempts, please try again later",
+  },
+});
