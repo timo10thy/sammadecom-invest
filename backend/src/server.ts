@@ -6,7 +6,7 @@ import cookieParser from "cookie-parser";
 import rateLimit from "express-rate-limit";
 import { authRouter } from "./modules/auth/authRoutes.js";
 import { startTokenCleanupJob } from "./jobs/tokenCleanup.js";
-
+import { investorsRouter } from "./modules/investors/investorsRoutes.js";
 const app = express();
 
 app.use(helmet());
@@ -26,6 +26,7 @@ const globalLimiter = rateLimit({
 app.use(globalLimiter);
 
 app.use("/auth", authRouter);
+app.use("/investors", investorsRouter);
 
 app.get("/health", (req, res) => {
   res.json({ status: "ok" });
