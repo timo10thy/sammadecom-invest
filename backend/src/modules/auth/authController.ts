@@ -111,6 +111,13 @@ export const loginUser = async (req: Request, res: Response) => {
         .json({ status: "fail", message: "Invalid email or password" });
     }
 
+    if (user.investorProfile?.status === "REJECTED") {
+      return res.status(403).json({
+        status: "fail",
+        message: "Your account cannot be used. Please contact SAMMADECOM.",
+      });
+    }
+
     const accessToken = signAccessToken({ userId: user.id, role: user.role });
     const refreshToken = generateRefreshToken();
 
