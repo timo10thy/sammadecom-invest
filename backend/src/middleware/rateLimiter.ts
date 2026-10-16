@@ -103,3 +103,17 @@ export const updateProfileLimiter = rateLimit({
     message: "Too many attempts, please try again later",
   },
 });
+
+//investment
+export const createInvestmentsLimiter = rateLimit({
+  windowMs: 60 * MINUTE,
+  limit: 30,
+  standardHeaders: "draft-8",
+  legacyHeaders: false,
+  keyGenerator: (req: Request): string =>
+    req.user?.userId ?? ipKeyGenerator(req.ip ?? ""),
+  message: {
+    status: "fail",
+    message: "Too many attempts, please try again later",
+  },
+});
