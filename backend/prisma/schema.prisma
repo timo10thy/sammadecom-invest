@@ -16,9 +16,12 @@ enum Role {
 
 enum InvestmentStatus {
   PENDING
+  FINANCE_VERIFIED
   ACTIVE
   MATURED
   PAID
+  RETURNED
+  REJECTED
 }
 
 enum PaymentStatus {
@@ -48,6 +51,10 @@ model User {
   submittedPayments Payment[]      @relation("SubmittedBy")
   approvedPayments  Payment[]      @relation("ApprovedBy")
   auditLogs         AuditLog[]
+  createdDeposits            Deposit[]    @relation("DepositCreatedBy")
+  createdInvestments         Investment[] @relation("InvestmentCreatedBy")
+  financeVerifiedInvestments Investment[] @relation("InvestmentFinanceVerifiedBy")
+  approvedInvestments        Investment[] @relation("InvestmentApprovedBy")
   refreshTokens     RefreshToken[]
 }
 
@@ -70,26 +77,68 @@ model Investor {
   bankName             String?
 
   investments Investment[]
+  deposits    Deposit[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 }
 
 model Investment {
-  id         String           @id @default(uuid())
+  id         String   @id @default(uuid())
   investorId String
-  investor   Investor         @relation(fields: [investorId], references: [id])
+  investor   Investor @relation(fields: [investorId], references: [id])
 
-  planName     String
-  amount       Decimal
-  startDate    DateTime
-  maturityDate DateTime
+  depositId String
+  deposit   Deposit @relation(fields: [depositId], references: [id])
+
+  planName   String
+  amount     Decimal
+  roiPercent Decimal @db.Decimal(5, 2)
+
+  startDate    DateTime?
+  maturityDate DateTime?
   status       InvestmentStatus @default(PENDING)
+
+  createdById String
+  createdBy   User   @relation("InvestmentCreatedBy", fields: [createdById], references: [id])
+
+  financeVerifiedById String?
+  financeVerifiedBy   User?     @relation("InvestmentFinanceVerifiedBy", fields: [financeVerifiedById], references: [id])
+  financeVerifiedAt   DateTime?
+
+  approvedById String?
+  approvedBy   User?     @relation("InvestmentApprovedBy", fields: [approvedById], references: [id])
+  approvedAt   DateTime?
+
+  reviewReason String?
 
   payments Payment[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+
+  @@index([depositId])
+  @@index([status])
+}
+
+model Deposit {
+  id         String   @id @default(uuid())
+  investorId String
+  investor   Investor @relation(fields: [investorId], references: [id])
+
+  reference   String   @unique
+  totalAmount Decimal  @db.Decimal(14, 2)
+  datePaid    DateTime
+
+  createdById String
+  createdBy   User   @relation("DepositCreatedBy", fields: [createdById], references: [id])
+
+  investments Investment[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([investorId])
 }
 
 model Payment {
