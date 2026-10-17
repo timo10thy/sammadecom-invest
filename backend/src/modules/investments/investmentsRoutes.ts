@@ -3,10 +3,21 @@ import {
   authenticate,
   authorizeRoles,
 } from "../../middleware/authMiddleware.js";
-import { createInvestmentsLimiter } from "../../middleware/rateLimiter.js";
-import { createInvestments } from "./investmentsController.js";
+import {
+  createInvestmentsLimiter,
+  listInvestmentsLimiter,
+} from "../../middleware/rateLimiter.js";
+import { createInvestments, listInvestments } from "./investmentsController.js";
 
 export const investmentsRouter = Router();
+
+investmentsRouter.get(
+  "/",
+  authenticate,
+  authorizeRoles("STAFF", "FINANCE", "MANAGEMENT"),
+  listInvestmentsLimiter,
+  listInvestments
+);
 
 investmentsRouter.post(
   "/",
