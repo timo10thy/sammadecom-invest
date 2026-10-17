@@ -3,7 +3,9 @@ import { prisma } from "../../config/prisma.js";
 import { CURRENT_ROI_PERCENT } from "./investmentsConfig.js";
 import {
   cleanReference,
+  isInvestmentStatus,
   parseDateOnly,
+  parseWholeNumber,
   validateCreateInvestmentsInput,
 } from "./investmentsValidation.js";
 
@@ -164,6 +166,108 @@ export const createInvestments = async (req: Request, res: Response) => {
       });
     }
     console.error("Create investments failed:", error);
+    return res
+      .status(500)
+      .json({ status: "error", message: "Something went wrong" });
+  }
+};
+
+//getinvestment
+export const listInvestments = async (req: Request, res: Response) => {
+  try {
+    const userId = req.user?.userId;
+    const role = req.user?.role;
+    if (!userId || !role) {
+      return res
+        .status(401)
+        .json({ status: "fail", message: "Invalid or expired token" });
+    }
+    const isStaff = role === "STAFF";
+
+    const rawStatus = req.query["status"];
+    if (rawStatus !== undefined && !isInvestmentStatus(rawStatus)) {
+      return res
+        .status(400)
+        .json({ status: "fail", message: "Invalid status" });
+    }
+
+    let page = 1;
+    const rawPage = req.query["page"];
+    if (rawPage !== undefined) {
+      const parsed = parseWholeNumber(rawPage);
+      if (parsed === null) {
+        return res.status(400).json({
+          status: "fail",
+          message: "Page must be a whole number above 0",
+        });
+      }
+      page = parsed;
+    }
+
+    let limit = 20;
+    const rawLimit = req.query["limit"];
+    if (rawLimit !== undefined) {
+      const parsed = parseWholeNumber(rawLimit);
+      if (parsed === null) {
+        return res.status(400).json({
+          status: "fail",
+          message: "Limit must be a whole number above 0",
+        });
+      }
+      limit = Math.min(parsed, 50);
+    }
+
+    // return and created investment
+    const where = {
+      ...(rawStatus !== undefined ? { status: rawStatus } : {}),
+      ...(isStaff
+        ? { OR: [{ status: "RETURNED" as const }, { createdById: userId }] }
+        : {}),
+    };
+
+    const [total, investments] = await Promise.all([
+      prisma.investment.count({ where }),
+      prisma.investment.findMany({
+        where,
+        orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+        skip: (page - 1) * limit,
+        take: limit,
+        select: {
+          id: true,
+          planName: true,
+          amount: true,
+          roiPercent: true,
+          status: true,
+          startDate: true,
+          maturityDate: true,
+          reviewReason: true,
+          createdAt: true,
+          financeVerifiedAt: true,
+          approvedAt: true,
+          deposit: {
+            select: { reference: true, totalAmount: true, datePaid: true },
+          },
+          investor: {
+            select: {
+              id: true,
+              user: { select: { name: true, email: true } },
+              // Staff never see bank details
+              ...(isStaff ? {} : { bankName: true, bankAccountLast4: true }),
+            },
+          },
+          createdBy: { select: { name: true } },
+          financeVerifiedBy: { select: { name: true } },
+          approvedBy: { select: { name: true } },
+        },
+      }),
+    ]);
+
+    return res.status(200).json({
+      status: "success",
+      data: { investments, total, page, limit },
+    });
+  } catch (error) {
+    console.error("List investments failed:", error);
     return res
       .status(500)
       .json({ status: "error", message: "Something went wrong" });

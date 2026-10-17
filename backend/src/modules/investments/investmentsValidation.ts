@@ -154,3 +154,37 @@ export const validateCreateInvestmentsInput = (
 
   return null;
 };
+
+//get investment validation
+const INVESTMENT_STATUSES = [
+  "PENDING",
+  "FINANCE_VERIFIED",
+  "ACTIVE",
+  "MATURED",
+  "PAID",
+  "RETURNED",
+  "REJECTED",
+] as const;
+
+export type InvestmentStatusValue = (typeof INVESTMENT_STATUSES)[number];
+
+export const isInvestmentStatus = (
+  value: unknown
+): value is InvestmentStatusValue =>
+  typeof value === "string" &&
+  INVESTMENT_STATUSES.some((status) => status === value);
+
+export const parseWholeNumber = (value: unknown): number | null => {
+  if (typeof value !== "string" || value === "") {
+    return null;
+  }
+  const allDigits = value.split("").every((c) => c >= "0" && c <= "9");
+  if (!allDigits) {
+    return null;
+  }
+  const num = Number(value);
+  if (!Number.isSafeInteger(num) || num < 1) {
+    return null;
+  }
+  return num;
+};
