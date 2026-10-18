@@ -157,3 +157,17 @@ export const correctInvestmentLimiter = rateLimit({
     message: "Too many requests, please try again later",
   },
 });
+
+//payment
+export const createPaymentLimiter = rateLimit({
+  windowMs: 60 * MINUTE,
+  limit: 200,
+  standardHeaders: "draft-8",
+  legacyHeaders: false,
+  keyGenerator: (req: Request): string =>
+    req.user?.userId ?? ipKeyGenerator(req.ip ?? ""),
+  message: {
+    status: "fail",
+    message: "Too many requests, please try again later",
+  },
+});
