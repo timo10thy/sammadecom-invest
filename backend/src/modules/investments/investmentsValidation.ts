@@ -188,3 +188,65 @@ export const parseWholeNumber = (value: unknown): number | null => {
   }
   return num;
 };
+
+export const validateCorrectInvestmentInput = (
+  body: unknown
+): string | null => {
+  if (typeof body !== "object" || body === null) {
+    return "Request body is required";
+  }
+  const { planName, amount, deposit } = body as {
+    planName?: unknown;
+    amount?: unknown;
+    deposit?: unknown;
+  };
+
+  if (planName === undefined && amount === undefined && deposit === undefined) {
+    return "Nothing to update";
+  }
+
+  if (planName !== undefined) {
+    if (
+      typeof planName !== "string" ||
+      planName.trim().length < 2 ||
+      planName.trim().length > 60
+    ) {
+      return "Plan name must be 2 to 60 characters";
+    }
+  }
+
+  if (amount !== undefined && !isValidAmountText(amount)) {
+    return "Amount must be above 0, with digits and one dot only, and at most 2 decimals";
+  }
+
+  if (deposit !== undefined) {
+    if (typeof deposit !== "object" || deposit === null) {
+      return "Deposit must be an object";
+    }
+    const { reference, totalAmount, datePaid } = deposit as {
+      reference?: unknown;
+      totalAmount?: unknown;
+      datePaid?: unknown;
+    };
+    if (reference !== undefined) {
+      return "The payment reference cannot be changed";
+    }
+    if (totalAmount === undefined && datePaid === undefined) {
+      return "Nothing to update in the Deposit";
+    }
+    if (totalAmount !== undefined && !isValidAmountText(totalAmount)) {
+      return "Deposit amount must be above 0, with digits and one dot only, and at most 2 decimals";
+    }
+    if (datePaid !== undefined) {
+      const paidDate = parseDateOnly(datePaid);
+      if (paidDate === null) {
+        return "Date paid must be a real date in the form YYYY-MM-DD";
+      }
+      if (paidDate.getTime() > Date.now() + DAY_MS) {
+        return "Date paid cannot be in the future";
+      }
+    }
+  }
+
+  return null;
+};
