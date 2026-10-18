@@ -6,10 +6,12 @@ import {
   cleanReference,
   isInvestmentStatus,
   parseDateOnly,
+  parseMonth,
   parseWholeNumber,
   validateCorrectInvestmentInput,
   validateCreateInvestmentsInput,
 } from "./investmentsValidation.js";
+import { calculateReturnCents, centsToText } from "./investmentsMoney.js";
 import { addSixMonths, getTodayInLagos } from "./investmentsDates.js";
 
 const isUniqueError = (error: unknown): boolean =>
@@ -686,6 +688,111 @@ export const correctInvestment = async (req: Request, res: Response) => {
     });
   } catch (error) {
     console.error("Correct investment failed:", error);
+    return res
+      .status(500)
+      .json({ status: "error", message: "Something went wrong" });
+  }
+};
+
+//investment due date 
+export const listDueInvestments = async (req: Request, res: Response) => {
+  try {
+    let year: number;
+    let month: number;
+
+    const rawMonth = req.query["month"];
+    if (rawMonth === undefined) {
+      const today = getTodayInLagos();
+      year = today.getUTCFullYear();
+      month = today.getUTCMonth() + 1;
+    } else {
+      const parsed = parseMonth(rawMonth);
+      if (parsed === null) {
+        return res.status(400).json({
+          status: "fail",
+          message: "Month must be in the form YYYY-MM",
+        });
+      }
+      year = parsed.year;
+      month = parsed.month;
+    }
+
+    const monthStart = new Date(Date.UTC(year, month - 1, 1));
+    const nextMonthStart = new Date(Date.UTC(year, month, 1));
+
+    // not paid yet, maturity date in this month or earlier
+    const items = await prisma.investment.findMany({
+      where: {
+        status: { in: ["ACTIVE", "MATURED"] },
+        maturityDate: { lt: nextMonthStart },
+      },
+      orderBy: [{ maturityDate: "asc" }, { id: "asc" }],
+      select: {
+        id: true,
+        planName: true,
+        amount: true,
+        roiPercent: true,
+        status: true,
+        maturityDate: true,
+        investor: {
+          select: {
+            id: true,
+            bankName: true,
+            bankAccountLast4: true,
+            user: { select: { name: true, email: true } },
+          },
+        },
+      },
+    });
+
+    let totalCents = BigInt(0);
+    let lateCount = 0;
+    const rows = [];
+
+    for (const item of items) {
+      if (item.maturityDate === null) {
+        continue;
+      }
+      const amountText = item.amount.toFixed(2);
+      const roiText = item.roiPercent.toFixed(2);
+      const returnCents = calculateReturnCents(amountText, roiText);
+      const payCents = amountToCents(amountText) + returnCents;
+      totalCents += payCents;
+
+      // earlier than this month means late
+      const late = item.maturityDate < monthStart;
+      if (late) {
+        lateCount += 1;
+      }
+
+      rows.push({
+        id: item.id,
+        planName: item.planName,
+        status: item.status,
+        amount: amountText,
+        roiPercent: roiText,
+        returnAmount: centsToText(returnCents),
+        amountToPay: centsToText(payCents),
+        maturityDate: item.maturityDate,
+        late,
+        investor: item.investor,
+      });
+    }
+
+    return res.status(200).json({
+      status: "success",
+      data: {
+        month: `${year}-${String(month).padStart(2, "0")}`,
+        investments: rows,
+        summary: {
+          count: rows.length,
+          lateCount,
+          totalAmountToPay: centsToText(totalCents),
+        },
+      },
+    });
+  } catch (error) {
+    console.error("List due investments failed:", error);
     return res
       .status(500)
       .json({ status: "error", message: "Something went wrong" });

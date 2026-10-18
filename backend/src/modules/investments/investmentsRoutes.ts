@@ -12,6 +12,7 @@ import {
 import {
   correctInvestment,
   createInvestments,
+  listDueInvestments,
   listInvestments,
   reviewInvestment,
 } from "./investmentsController.js";
@@ -24,6 +25,14 @@ investmentsRouter.get(
   authorizeRoles("STAFF", "FINANCE", "MANAGEMENT"),
   listInvestmentsLimiter,
   listInvestments
+);
+
+investmentsRouter.get(
+  "/due",
+  authenticate,
+  authorizeRoles("FINANCE", "MANAGEMENT"),
+  listInvestmentsLimiter,
+  listDueInvestments
 );
 
 investmentsRouter.post(
