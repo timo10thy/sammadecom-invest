@@ -250,3 +250,27 @@ export const validateCorrectInvestmentInput = (
 
   return null;
 };
+
+// payment validation and months
+// accepts YYYY-MM only
+export const parseMonth = (
+  value: unknown
+): { year: number; month: number } | null => {
+  if (typeof value !== "string") {
+    return null;
+  }
+  const parts = value.split("-");
+  const [y, m] = parts;
+  if (parts.length !== 2 || y === undefined || m === undefined) {
+    return null;
+  }
+  if (y.length !== 4 || m.length !== 2 || !isDigits(y) || !isDigits(m)) {
+    return null;
+  }
+  const year = Number(y);
+  const month = Number(m);
+  if (year < 2000 || year > 2100 || month < 1 || month > 12) {
+    return null;
+  }
+  return { year, month };
+};
