@@ -8,6 +8,7 @@ import {
   parseWholeNumber,
   validateCreateInvestmentsInput,
 } from "./investmentsValidation.js";
+import { addSixMonths, getTodayInLagos } from "./investmentsDates.js";
 
 const isUniqueError = (error: unknown): boolean =>
   typeof error === "object" &&
@@ -268,6 +269,220 @@ export const listInvestments = async (req: Request, res: Response) => {
     });
   } catch (error) {
     console.error("List investments failed:", error);
+    return res
+      .status(500)
+      .json({ status: "error", message: "Something went wrong" });
+  }
+};
+
+// investment approval
+type ReviewAction = "VERIFY" | "APPROVE" | "RETURN" | "REJECT";
+
+const isReviewAction = (value: unknown): value is ReviewAction =>
+  value === "VERIFY" ||
+  value === "APPROVE" ||
+  value === "RETURN" ||
+  value === "REJECT";
+
+const REVIEW_NEW_STATUS = {
+  VERIFY: "FINANCE_VERIFIED",
+  APPROVE: "ACTIVE",
+  RETURN: "RETURNED",
+  REJECT: "REJECTED",
+} as const;
+
+const REVIEW_AUDIT_ACTION: Record<ReviewAction, string> = {
+  VERIFY: "INVESTMENT_FINANCE_VERIFIED",
+  APPROVE: "INVESTMENT_APPROVED",
+  RETURN: "INVESTMENT_RETURNED",
+  REJECT: "INVESTMENT_REJECTED",
+};
+
+// Finance cannot approve, Management cannot verify
+const canDoAction = (role: string, action: ReviewAction): boolean => {
+  if (role === "FINANCE") {
+    return action !== "APPROVE";
+  }
+  if (role === "MANAGEMENT") {
+    return action !== "VERIFY";
+  }
+  return false;
+};
+
+export const reviewInvestment = async (req: Request, res: Response) => {
+  try {
+    const reviewerId = req.user?.userId;
+    const role = req.user?.role;
+    if (!reviewerId || !role) {
+      return res
+        .status(401)
+        .json({ status: "fail", message: "Invalid or expired token" });
+    }
+
+    const investmentId = req.params["investmentId"];
+    if (typeof investmentId !== "string" || investmentId === "") {
+      return res
+        .status(400)
+        .json({ status: "fail", message: "Investment id is required" });
+    }
+
+    const body = req.body ?? {};
+    const action: unknown = body.action;
+    const reason: unknown = body.reason;
+
+    if (!isReviewAction(action)) {
+      return res.status(400).json({
+        status: "fail",
+        message: "Action must be VERIFY, APPROVE, RETURN or REJECT",
+      });
+    }
+    if (!canDoAction(role, action)) {
+      return res.status(403).json({
+        status: "fail",
+        message: "You do not have permission to do this",
+      });
+    }
+
+    let cleanReason: string | null = null;
+    if (action === "RETURN" || action === "REJECT") {
+      if (typeof reason !== "string" || reason.trim().length < 5) {
+        return res.status(400).json({
+          status: "fail",
+          message: "A reason of at least 5 characters is required",
+        });
+      }
+      cleanReason = reason.trim();
+    }
+
+    const investment = await prisma.investment.findUnique({
+      where: { id: investmentId },
+      select: {
+        id: true,
+        status: true,
+        investor: { select: { status: true } },
+      },
+    });
+    if (!investment) {
+      return res
+        .status(404)
+        .json({ status: "fail", message: "Investment not found" });
+    }
+
+    //pending status check Finance works on PENDING, Management works on FINANCE_VERIFIED
+    const requiredStatus =
+      role === "FINANCE" ? ("PENDING" as const) : ("FINANCE_VERIFIED" as const);
+    if (investment.status !== requiredStatus) {
+      return res.status(409).json({
+        status: "fail",
+        message: "This status change is not allowed",
+      });
+    }
+
+    // the investor is checked 
+    if (
+      (action === "VERIFY" || action === "APPROVE") &&
+      investment.investor.status !== "VERIFIED"
+    ) {
+      return res.status(403).json({
+        status: "fail",
+        message: "This investor is not verified",
+      });
+    }
+
+    const now = new Date();
+    const newStatus = REVIEW_NEW_STATUS[action];
+    let startDate: Date | null = null;
+    let maturityDate: Date | null = null;
+    if (action === "APPROVE") {
+      startDate = getTodayInLagos();
+      maturityDate = addSixMonths(startDate);
+    }
+
+    const done = await prisma.$transaction(async (tx) => {
+      // status check
+      const where = { id: investment.id, status: requiredStatus };
+      let updatedCount = 0;
+
+      if (action === "VERIFY") {
+        const result = await tx.investment.updateMany({
+          where,
+          data: {
+            status: newStatus,
+            financeVerifiedById: reviewerId,
+            financeVerifiedAt: now,
+            reviewReason: null,
+          },
+        });
+        updatedCount = result.count;
+      } else if (action === "APPROVE") {
+        const result = await tx.investment.updateMany({
+          where,
+          data: {
+            status: newStatus,
+            approvedById: reviewerId,
+            approvedAt: now,
+            startDate,
+            maturityDate,
+            reviewReason: null,
+          },
+        });
+        updatedCount = result.count;
+      } else if (action === "RETURN") {
+        //  Finance check is cleared
+        const result = await tx.investment.updateMany({
+          where,
+          data: {
+            status: newStatus,
+            reviewReason: cleanReason,
+            financeVerifiedById: null,
+            financeVerifiedAt: null,
+          },
+        });
+        updatedCount = result.count;
+      } else {
+        const result = await tx.investment.updateMany({
+          where,
+          data: { status: newStatus, reviewReason: cleanReason },
+        });
+        updatedCount = result.count;
+      }
+
+      if (updatedCount === 0) {
+        return false;
+      }
+
+      await tx.auditLog.create({
+        data: {
+          userId: reviewerId,
+          action: REVIEW_AUDIT_ACTION[action],
+          entityType: "Investment",
+          entityId: investment.id,
+        },
+      });
+
+      return true;
+    });
+
+    if (!done) {
+      return res.status(409).json({
+        status: "fail",
+        message: "This status change is not allowed",
+      });
+    }
+
+    return res.status(200).json({
+      status: "success",
+      data: {
+        investment: {
+          id: investment.id,
+          status: newStatus,
+          startDate,
+          maturityDate,
+        },
+      },
+    });
+  } catch (error) {
+    console.error("Review investment failed:", error);
     return res
       .status(500)
       .json({ status: "error", message: "Something went wrong" });
