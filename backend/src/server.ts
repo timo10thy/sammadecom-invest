@@ -8,6 +8,7 @@ import { authRouter } from "./modules/auth/authRoutes.js";
 import { startTokenCleanupJob } from "./jobs/tokenCleanup.js";
 import { investorsRouter } from "./modules/investors/investorsRoutes.js";
 import { investmentsRouter } from "./modules/investments/investmentsRoutes.js";
+import { paymentsRouter } from "./modules/payments/paymentsRoutes.js";
 const app = express();
 
 app.use(helmet());
@@ -29,6 +30,7 @@ app.use(globalLimiter);
 app.use("/auth", authRouter);
 app.use("/investors", investorsRouter);
 app.use("/investments", investmentsRouter);
+app.use("/payments", paymentsRouter);
 
 
 app.get("/health", (req, res) => {
