@@ -4,11 +4,13 @@ import {
   authorizeRoles,
 } from "../../middleware/authMiddleware.js";
 import {
+  correctInvestmentLimiter,
   createInvestmentsLimiter,
   listInvestmentsLimiter,
   reviewInvestmentLimiter,
 } from "../../middleware/rateLimiter.js";
 import {
+  correctInvestment,
   createInvestments,
   listInvestments,
   reviewInvestment,
@@ -38,4 +40,12 @@ investmentsRouter.patch(
   authorizeRoles("FINANCE", "MANAGEMENT"),
   reviewInvestmentLimiter,
   reviewInvestment
+);
+
+investmentsRouter.patch(
+  "/:investmentId",
+  authenticate,
+  authorizeRoles("STAFF"),
+  correctInvestmentLimiter,
+  correctInvestment
 );

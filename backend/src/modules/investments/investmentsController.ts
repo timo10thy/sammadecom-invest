@@ -2,10 +2,12 @@ import type { Request, Response } from "express";
 import { prisma } from "../../config/prisma.js";
 import { CURRENT_ROI_PERCENT } from "./investmentsConfig.js";
 import {
+  amountToCents,
   cleanReference,
   isInvestmentStatus,
   parseDateOnly,
   parseWholeNumber,
+  validateCorrectInvestmentInput,
   validateCreateInvestmentsInput,
 } from "./investmentsValidation.js";
 import { addSixMonths, getTodayInLagos } from "./investmentsDates.js";
@@ -483,6 +485,207 @@ export const reviewInvestment = async (req: Request, res: Response) => {
     });
   } catch (error) {
     console.error("Review investment failed:", error);
+    return res
+      .status(500)
+      .json({ status: "error", message: "Something went wrong" });
+  }
+};
+
+//PATCH correction by stafff
+export const correctInvestment = async (req: Request, res: Response) => {
+  try {
+    const staffId = req.user?.userId;
+    if (!staffId) {
+      return res
+        .status(401)
+        .json({ status: "fail", message: "Invalid or expired token" });
+    }
+
+    const investmentId = req.params["investmentId"];
+    if (typeof investmentId !== "string" || investmentId === "") {
+      return res
+        .status(400)
+        .json({ status: "fail", message: "Investment id is required" });
+    }
+
+    const body = req.body ?? {};
+    const validationError = validateCorrectInvestmentInput(body);
+    if (validationError) {
+      return res.status(400).json({ status: "fail", message: validationError });
+    }
+
+    const { planName, amount, deposit } = body as {
+      planName?: string;
+      amount?: string;
+      deposit?: { totalAmount?: string; datePaid?: string };
+    };
+    const newDatePaid =
+      deposit?.datePaid !== undefined ? parseDateOnly(deposit.datePaid) : null;
+
+    const investment = await prisma.investment.findUnique({
+      where: { id: investmentId },
+      select: {
+        id: true,
+        status: true,
+        planName: true,
+        amount: true,
+        depositId: true,
+        deposit: { select: { id: true, totalAmount: true, datePaid: true } },
+      },
+    });
+    if (!investment) {
+      return res
+        .status(404)
+        .json({ status: "fail", message: "Investment not found" });
+    }
+    if (investment.status !== "RETURNED") {
+      return res.status(409).json({
+        status: "fail",
+        message: "Only a returned investment can be corrected",
+      });
+    }
+
+    const result = await prisma.$transaction(
+      async (tx) => {
+        // the Deposit is locked once Finance verified any investment under it
+        if (deposit !== undefined) {
+          const underDeposit = await tx.investment.findMany({
+            where: { depositId: investment.depositId },
+            select: { id: true },
+          });
+          const verifiedCount = await tx.auditLog.count({
+            where: {
+              action: "INVESTMENT_FINANCE_VERIFIED",
+              entityType: "Investment",
+              entityId: { in: underDeposit.map((item) => item.id) },
+            },
+          });
+          if (verifiedCount > 0) {
+            return "LOCKED" as const;
+          }
+        }
+
+        // Rule 2: investments that are not rejected cannot add up to more than the Deposit
+        const siblings = await tx.investment.findMany({
+          where: {
+            depositId: investment.depositId,
+            status: { not: "REJECTED" },
+          },
+          select: { id: true, amount: true },
+        });
+        const newTotal =
+          deposit?.totalAmount ?? investment.deposit.totalAmount.toFixed(2);
+        let sum = BigInt(0);
+        for (const sibling of siblings) {
+          const text =
+            sibling.id === investment.id
+              ? (amount ?? sibling.amount.toFixed(2))
+              : sibling.amount.toFixed(2);
+          sum += amountToCents(text);
+        }
+        if (sum > amountToCents(newTotal)) {
+          return "TOO_MUCH" as const;
+        }
+
+        const investmentData: { planName?: string; amount?: string } = {};
+        const investmentChanges: string[] = [];
+        if (planName !== undefined) {
+          investmentData.planName = planName.trim();
+          investmentChanges.push(
+            `planName: ${investment.planName} -> ${planName.trim()}`
+          );
+        }
+        if (amount !== undefined) {
+          investmentData.amount = amount;
+          investmentChanges.push(
+            `amount: ${investment.amount.toFixed(2)} -> ${amount}`
+          );
+        }
+
+        // only change it if the investment is still RETURNED
+        const updated = await tx.investment.updateMany({
+          where: { id: investment.id, status: "RETURNED" },
+          data: { ...investmentData, status: "PENDING" },
+        });
+        if (updated.count === 0) {
+          return "CHANGED" as const;
+        }
+
+        await tx.auditLog.create({
+          data: {
+            userId: staffId,
+            action: "INVESTMENT_CORRECTED",
+            entityType: "Investment",
+            entityId: investment.id,
+            details:
+              investmentChanges.length > 0
+                ? investmentChanges.join("; ")
+                : "resubmitted with no change to the investment",
+          },
+        });
+
+        if (deposit !== undefined) {
+          const depositData: { totalAmount?: string; datePaid?: Date } = {};
+          const depositChanges: string[] = [];
+          if (deposit.totalAmount !== undefined) {
+            depositData.totalAmount = deposit.totalAmount;
+            depositChanges.push(
+              `totalAmount: ${investment.deposit.totalAmount.toFixed(2)} -> ${deposit.totalAmount}`
+            );
+          }
+          if (newDatePaid !== null) {
+            depositData.datePaid = newDatePaid;
+            depositChanges.push(
+              `datePaid: ${investment.deposit.datePaid.toISOString().slice(0, 10)} -> ${deposit.datePaid}`
+            );
+          }
+
+          await tx.deposit.update({
+            where: { id: investment.deposit.id },
+            data: depositData,
+          });
+          await tx.auditLog.create({
+            data: {
+              userId: staffId,
+              action: "DEPOSIT_CORRECTED",
+              entityType: "Deposit",
+              entityId: investment.deposit.id,
+              details: depositChanges.join("; "),
+            },
+          });
+        }
+
+        return "OK" as const;
+      },
+      { maxWait: 10000, timeout: 30000 }
+    );
+
+    if (result === "LOCKED") {
+      return res.status(409).json({
+        status: "fail",
+        message:
+          "The Deposit is locked because Finance already verified an investment under it",
+      });
+    }
+    if (result === "TOO_MUCH") {
+      return res.status(400).json({
+        status: "fail",
+        message: "The investments would add up to more than the Deposit amount",
+      });
+    }
+    if (result === "CHANGED") {
+      return res.status(409).json({
+        status: "fail",
+        message: "This investment cannot be corrected right now",
+      });
+    }
+
+    return res.status(200).json({
+      status: "success",
+      data: { investment: { id: investment.id, status: "PENDING" } },
+    });
+  } catch (error) {
+    console.error("Correct investment failed:", error);
     return res
       .status(500)
       .json({ status: "error", message: "Something went wrong" });

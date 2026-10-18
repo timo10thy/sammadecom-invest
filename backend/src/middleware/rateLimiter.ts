@@ -144,3 +144,16 @@ export const reviewInvestmentLimiter = rateLimit({
     message: "Too many requests, please try again later",
   },
 });
+
+export const correctInvestmentLimiter = rateLimit({
+  windowMs: 60 * MINUTE,
+  limit: 30,
+  standardHeaders: "draft-8",
+  legacyHeaders: false,
+  keyGenerator: (req: Request): string =>
+    req.user?.userId ?? ipKeyGenerator(req.ip ?? ""),
+  message: {
+    status: "fail",
+    message: "Too many requests, please try again later",
+  },
+});
