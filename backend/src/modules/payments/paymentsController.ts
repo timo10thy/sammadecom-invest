@@ -6,6 +6,7 @@ import {
   centsToText,
 } from "../investments/investmentsMoney.js";
 import { amountToCents } from "../investments/investmentsValidation.js";
+import { parseWholeNumber } from "../investments/investmentsValidation.js";
 
 const isUniqueError = (error: unknown): boolean =>
   typeof error === "object" &&
@@ -163,6 +164,103 @@ export const createPayment = async (req: Request, res: Response) => {
       });
     }
     console.error("Create payment failed:", error);
+    return res
+      .status(500)
+      .json({ status: "error", message: "Something went wrong" });
+  }
+};
+
+// who see payment status
+const isPaymentStatus = (
+  value: unknown
+): value is "PENDING_APPROVAL" | "APPROVED" | "REJECTED" | "PROCESSED" =>
+  value === "PENDING_APPROVAL" ||
+  value === "APPROVED" ||
+  value === "REJECTED" ||
+  value === "PROCESSED";
+
+export const listPayments = async (req: Request, res: Response) => {
+  try {
+    const rawStatus = req.query["status"];
+    if (rawStatus !== undefined && !isPaymentStatus(rawStatus)) {
+      return res
+        .status(400)
+        .json({ status: "fail", message: "Invalid status" });
+    }
+
+    let page = 1;
+    const rawPage = req.query["page"];
+    if (rawPage !== undefined) {
+      const parsed = parseWholeNumber(rawPage);
+      if (parsed === null) {
+        return res.status(400).json({
+          status: "fail",
+          message: "Page must be a whole number above 0",
+        });
+      }
+      page = parsed;
+    }
+
+    let limit = 20;
+    const rawLimit = req.query["limit"];
+    if (rawLimit !== undefined) {
+      const parsed = parseWholeNumber(rawLimit);
+      if (parsed === null) {
+        return res.status(400).json({
+          status: "fail",
+          message: "Limit must be a whole number above 0",
+        });
+      }
+      limit = Math.min(parsed, 50);
+    }
+
+    const where = rawStatus === undefined ? {} : { status: rawStatus };
+
+    const [total, payments] = await Promise.all([
+      prisma.payment.count({ where }),
+      prisma.payment.findMany({
+        where,
+        orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+        skip: (page - 1) * limit,
+        take: limit,
+        // the full bank number and the encrypted copy are never selected
+        select: {
+          id: true,
+          amount: true,
+          status: true,
+          rejectionReason: true,
+          bankReference: true,
+          createdAt: true,
+          approvedAt: true,
+          processedAt: true,
+          submittedBy: { select: { name: true } },
+          approvedBy: { select: { name: true } },
+          processedBy: { select: { name: true } },
+          investment: {
+            select: {
+              id: true,
+              planName: true,
+              maturityDate: true,
+              investor: {
+                select: {
+                  id: true,
+                  bankName: true,
+                  bankAccountLast4: true,
+                  user: { select: { name: true, email: true } },
+                },
+              },
+            },
+          },
+        },
+      }),
+    ]);
+
+    return res.status(200).json({
+      status: "success",
+      data: { payments, total, page, limit },
+    });
+  } catch (error) {
+    console.error("List payments failed:", error);
     return res
       .status(500)
       .json({ status: "error", message: "Something went wrong" });
