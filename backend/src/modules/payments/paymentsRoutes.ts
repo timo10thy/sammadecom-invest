@@ -6,8 +6,13 @@ import {
 import {
   createPaymentLimiter,
   listPaymentsLimiter,
+  reviewPaymentLimiter,
 } from "../../middleware/rateLimiter.js";
-import { createPayment, listPayments } from "./paymentsController.js";
+import {
+  createPayment,
+  listPayments,
+  reviewPayment,
+} from "./paymentsController.js";
 
 export const paymentsRouter = Router();
 
@@ -25,4 +30,12 @@ paymentsRouter.post(
   authorizeRoles("FINANCE"),
   createPaymentLimiter,
   createPayment
+);
+
+paymentsRouter.patch(
+  "/:paymentId/review",
+  authenticate,
+  authorizeRoles("MANAGEMENT"),
+  reviewPaymentLimiter,
+  reviewPayment
 );
