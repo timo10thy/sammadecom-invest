@@ -266,3 +266,186 @@ export const listPayments = async (req: Request, res: Response) => {
       .json({ status: "error", message: "Something went wrong" });
   }
 };
+
+//patch
+type ReviewPaymentAction = "APPROVE" | "REJECT";
+
+const isReviewPaymentAction = (value: unknown): value is ReviewPaymentAction =>
+  value === "APPROVE" || value === "REJECT";
+
+export const reviewPayment = async (req: Request, res: Response) => {
+  try {
+    const reviewerId = req.user?.userId;
+    if (!reviewerId) {
+      return res
+        .status(401)
+        .json({ status: "fail", message: "Invalid or expired token" });
+    }
+
+    const paymentId = req.params["paymentId"];
+    if (typeof paymentId !== "string" || paymentId === "") {
+      return res
+        .status(400)
+        .json({ status: "fail", message: "Payment id is required" });
+    }
+
+    const body = req.body ?? {};
+    const action: unknown = body.action;
+    const reason: unknown = body.reason;
+
+    if (!isReviewPaymentAction(action)) {
+      return res.status(400).json({
+        status: "fail",
+        message: "Action must be APPROVE or REJECT",
+      });
+    }
+
+    let cleanReason: string | null = null;
+    if (action === "REJECT") {
+      if (typeof reason !== "string" || reason.trim().length < 5) {
+        return res.status(400).json({
+          status: "fail",
+          message: "A reason of at least 5 characters is required to reject",
+        });
+      }
+      cleanReason = reason.trim();
+    }
+
+    const payment = await prisma.payment.findUnique({
+      where: { id: paymentId },
+      select: {
+        id: true,
+        status: true,
+        amount: true,
+        bankAccountSnapshot: true,
+        investmentId: true,
+        investment: {
+          select: {
+            status: true,
+            investor: { select: { status: true, bankAccountEncrypted: true } },
+          },
+        },
+      },
+    });
+    if (!payment) {
+      return res
+        .status(404)
+        .json({ status: "fail", message: "Payment not found" });
+    }
+
+    if (payment.status !== "PENDING_APPROVAL") {
+      return res.status(409).json({
+        status: "fail",
+        message: "This payout request is not waiting for approval",
+      });
+    }
+
+    if (action === "APPROVE") {
+      if (payment.investment.investor.status !== "VERIFIED") {
+        return res.status(403).json({
+          status: "fail",
+          message: "This investor is not verified",
+        });
+      }
+      if (
+        payment.investment.status !== "ACTIVE" &&
+        payment.investment.status !== "MATURED"
+      ) {
+        return res
+          .status(409)
+          .json({ status: "fail", message: "This investment is not active" });
+      }
+      // the bank details must be the same as when Finance submitted
+      if (
+        payment.investment.investor.bankAccountEncrypted !==
+        payment.bankAccountSnapshot
+      ) {
+        return res.status(409).json({
+          status: "fail",
+          message:
+            "The investor's bank details changed after this request. Please reject it so Finance can submit a new one.",
+        });
+      }
+    }
+
+    const now = new Date();
+    const amountText = payment.amount.toFixed(2);
+
+    const done = await prisma.$transaction(
+      async (tx) => {
+        let updatedCount = 0;
+
+        if (action === "APPROVE") {
+          // check again that nothing changed
+          const stillOk = await tx.investment.count({
+            where: {
+              id: payment.investmentId,
+              status: { in: ["ACTIVE", "MATURED"] },
+              investor: {
+                status: "VERIFIED",
+                bankAccountEncrypted: payment.bankAccountSnapshot,
+              },
+            },
+          });
+          if (stillOk === 0) {
+            return false;
+          }
+
+          const result = await tx.payment.updateMany({
+            where: { id: payment.id, status: "PENDING_APPROVAL" },
+            data: { status: "APPROVED", approvedById: reviewerId, approvedAt: now },
+          });
+          updatedCount = result.count;
+        } else {
+          const result = await tx.payment.updateMany({
+            where: { id: payment.id, status: "PENDING_APPROVAL" },
+            data: { status: "REJECTED", rejectionReason: cleanReason },
+          });
+          updatedCount = result.count;
+        }
+
+        if (updatedCount === 0) {
+          return false;
+        }
+
+        await tx.auditLog.create({
+          data: {
+            userId: reviewerId,
+            action: action === "APPROVE" ? "PAYMENT_APPROVED" : "PAYMENT_REJECTED",
+            entityType: "Payment",
+            entityId: payment.id,
+            details:
+              action === "APPROVE"
+                ? `amount: ${amountText}`
+                : `reason: ${cleanReason}`,
+          },
+        });
+
+        return true;
+      },
+      { maxWait: 10000, timeout: 30000 }
+    );
+
+    if (!done) {
+      return res.status(409).json({
+        status: "fail",
+        message: "This payout request cannot be changed right now",
+      });
+    }
+
+    return res.status(200).json({
+      status: "success",
+      data: {
+        payment: {
+          id: payment.id,
+          status: action === "APPROVE" ? "APPROVED" : "REJECTED",
+        },
+      },
+    });
+  } catch (error) {
+    console.error("Review payment failed:", error);
+    return res
+      .status(500)
+      .json({ status: "error", message: "Something went wrong" });
+  }
+};
