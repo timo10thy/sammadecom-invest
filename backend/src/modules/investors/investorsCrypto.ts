@@ -1,4 +1,4 @@
-import { createCipheriv, randomBytes } from "node:crypto";
+import { createCipheriv, createDecipheriv, randomBytes } from "node:crypto";
 
 const KEY_VERSION = "v1";
 
@@ -35,4 +35,34 @@ export const encryptBankAccount = (
     tag.toString("hex"),
     encrypted.toString("hex"),
   ].join(":");
+};
+
+//bankdetails
+export const decryptBankAccount = (
+  stored: string,
+  investorId: string
+): string => {
+  const parts = stored.split(":");
+  const [version, ivHex, tagHex, dataHex] = parts;
+  if (
+    parts.length !== 4 ||
+    version !== KEY_VERSION ||
+    ivHex === undefined ||
+    tagHex === undefined ||
+    dataHex === undefined
+  ) {
+    throw new Error("Bank account value is not in a known format");
+  }
+  const decipher = createDecipheriv(
+    "aes-256-gcm",
+    getKey(),
+    Buffer.from(ivHex, "hex")
+  );
+  decipher.setAAD(Buffer.from(investorId, "utf8"));
+  decipher.setAuthTag(Buffer.from(tagHex, "hex"));
+  const decrypted = Buffer.concat([
+    decipher.update(Buffer.from(dataHex, "hex")),
+    decipher.final(),
+  ]);
+  return decrypted.toString("utf8");
 };
