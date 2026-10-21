@@ -197,3 +197,17 @@ export const reviewPaymentLimiter = rateLimit({
     message: "Too many requests, please try again later",
   },
 });
+
+//bankdetails
+export const revealBankDetailsLimiter = rateLimit({
+  windowMs: 60 * MINUTE,
+  limit: 60,
+  standardHeaders: "draft-8",
+  legacyHeaders: false,
+  keyGenerator: (req: Request): string =>
+    req.user?.userId ?? ipKeyGenerator(req.ip ?? ""),
+  message: {
+    status: "fail",
+    message: "Too many requests, please try again later",
+  },
+});

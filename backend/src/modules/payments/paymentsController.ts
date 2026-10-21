@@ -7,6 +7,7 @@ import {
 } from "../investments/investmentsMoney.js";
 import { amountToCents } from "../investments/investmentsValidation.js";
 import { parseWholeNumber } from "../investments/investmentsValidation.js";
+import { decryptBankAccount } from "../investors/investorsCrypto.js";
 
 const isUniqueError = (error: unknown): boolean =>
   typeof error === "object" &&
@@ -444,6 +445,109 @@ export const reviewPayment = async (req: Request, res: Response) => {
     });
   } catch (error) {
     console.error("Review payment failed:", error);
+    return res
+      .status(500)
+      .json({ status: "error", message: "Something went wrong" });
+  }
+};
+
+//bankdetails
+export const getPaymentBankDetails = async (req: Request, res: Response) => {
+  try {
+    const financeId = req.user?.userId;
+    if (!financeId) {
+      return res
+        .status(401)
+        .json({ status: "fail", message: "Invalid or expired token" });
+    }
+
+    const paymentId = req.params["paymentId"];
+    if (typeof paymentId !== "string" || paymentId === "") {
+      return res
+        .status(400)
+        .json({ status: "fail", message: "Payment id is required" });
+    }
+
+    const payment = await prisma.payment.findUnique({
+      where: { id: paymentId },
+      select: {
+        id: true,
+        status: true,
+        amount: true,
+        bankAccountSnapshot: true,
+        investment: {
+          select: {
+            investor: {
+              select: {
+                id: true,
+                status: true,
+                bankName: true,
+                bankAccountEncrypted: true,
+                user: { select: { name: true } },
+              },
+            },
+          },
+        },
+      },
+    });
+    if (!payment) {
+      return res
+        .status(404)
+        .json({ status: "fail", message: "Payment not found" });
+    }
+
+    if (payment.status !== "APPROVED") {
+      return res.status(409).json({
+        status: "fail",
+        message:
+          "Bank details can only be shown for an approved payout request",
+      });
+    }
+
+    const investor = payment.investment.investor;
+    if (investor.status !== "VERIFIED") {
+      return res
+        .status(403)
+        .json({ status: "fail", message: "This investor is not verified" });
+    }
+
+    if (investor.bankAccountEncrypted !== payment.bankAccountSnapshot) {
+      return res.status(409).json({
+        status: "fail",
+        message:
+          "The investor's bank details changed after this request was submitted. Ask Management to reject it.",
+      });
+    }
+
+    const accountNumber = decryptBankAccount(
+      payment.bankAccountSnapshot,
+      investor.id
+    );
+
+    // no log, no number: write the log first
+    await prisma.auditLog.create({
+      data: {
+        userId: financeId,
+        action: "BANK_DETAILS_REVEALED",
+        entityType: "Payment",
+        entityId: payment.id,
+        details: `investor: ${investor.id}`,
+      },
+    });
+
+    res.set("Cache-Control", "no-store");
+    return res.status(200).json({
+      status: "success",
+      data: {
+        paymentId: payment.id,
+        investorName: investor.user.name,
+        bankName: investor.bankName,
+        accountNumber,
+        amount: payment.amount.toFixed(2),
+      },
+    });
+  } catch (error) {
+    console.error("Get payment bank details failed:", error);
     return res
       .status(500)
       .json({ status: "error", message: "Something went wrong" });
