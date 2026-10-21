@@ -5,8 +5,11 @@ import {
   calculateReturnCents,
   centsToText,
 } from "../investments/investmentsMoney.js";
-import { amountToCents } from "../investments/investmentsValidation.js";
-import { parseWholeNumber } from "../investments/investmentsValidation.js";
+import {
+  amountToCents,
+  cleanReference,
+  parseWholeNumber,
+} from "../investments/investmentsValidation.js";
 import { decryptBankAccount } from "../investors/investorsCrypto.js";
 
 const isUniqueError = (error: unknown): boolean =>
@@ -548,6 +551,149 @@ export const getPaymentBankDetails = async (req: Request, res: Response) => {
     });
   } catch (error) {
     console.error("Get payment bank details failed:", error);
+    return res
+      .status(500)
+      .json({ status: "error", message: "Something went wrong" });
+  }
+};
+
+export const processPayment = async (req: Request, res: Response) => {
+  try {
+    const financeId = req.user?.userId;
+    if (!financeId) {
+      return res
+        .status(401)
+        .json({ status: "fail", message: "Invalid or expired token" });
+    }
+
+    const paymentId = req.params["paymentId"];
+    if (typeof paymentId !== "string" || paymentId === "") {
+      return res
+        .status(400)
+        .json({ status: "fail", message: "Payment id is required" });
+    }
+
+    const body = req.body ?? {};
+    const reference = cleanReference(body.bankReference);
+    if (reference === null) {
+      return res.status(400).json({
+        status: "fail",
+        message:
+          "Bank transfer reference must be 3 to 50 characters: letters, numbers, dash, underscore or slash",
+      });
+    }
+
+    const payment = await prisma.payment.findUnique({
+      where: { id: paymentId },
+      select: {
+        id: true,
+        status: true,
+        amount: true,
+        investmentId: true,
+        investment: { select: { status: true } },
+      },
+    });
+    if (!payment) {
+      return res
+        .status(404)
+        .json({ status: "fail", message: "Payment not found" });
+    }
+
+    if (payment.status !== "APPROVED") {
+      return res.status(409).json({
+        status: "fail",
+        message: "Only an approved payout request can be processed",
+      });
+    }
+
+    if (
+      payment.investment.status !== "ACTIVE" &&
+      payment.investment.status !== "MATURED"
+    ) {
+      return res
+        .status(409)
+        .json({ status: "fail", message: "This investment is not active" });
+    }
+
+    const usedReference = await prisma.payment.findUnique({
+      where: { bankReference: reference },
+      select: { id: true },
+    });
+    if (usedReference) {
+      return res.status(409).json({
+        status: "fail",
+        message: "This bank transfer reference has already been used",
+      });
+    }
+
+    const now = new Date();
+    const amountText = payment.amount.toFixed(2);
+
+    await prisma.$transaction(
+      async (tx) => {
+        // only change it if it is still APPROVED
+        const updatedPayment = await tx.payment.updateMany({
+          where: { id: payment.id, status: "APPROVED" },
+          data: {
+            status: "PROCESSED",
+            processedById: financeId,
+            processedAt: now,
+            bankReference: reference,
+          },
+        });
+        if (updatedPayment.count === 0) {
+          throw new Error("CONFLICT");
+        }
+
+        const updatedInvestment = await tx.investment.updateMany({
+          where: {
+            id: payment.investmentId,
+            status: { in: ["ACTIVE", "MATURED"] },
+          },
+          data: { status: "PAID" },
+        });
+        if (updatedInvestment.count === 0) {
+          throw new Error("CONFLICT");
+        }
+
+        await tx.auditLog.create({
+          data: {
+            userId: financeId,
+            action: "PAYMENT_PROCESSED",
+            entityType: "Payment",
+            entityId: payment.id,
+            details: `reference: ${reference}; amount: ${amountText}`,
+          },
+        });
+      },
+      { maxWait: 10000, timeout: 30000 }
+    );
+
+    return res.status(200).json({
+      status: "success",
+      data: {
+        payment: {
+          id: payment.id,
+          status: "PROCESSED",
+          bankReference: reference,
+        },
+        investment: { id: payment.investmentId, status: "PAID" },
+      },
+    });
+  } catch (error) {
+    if (error instanceof Error && error.message === "CONFLICT") {
+      return res.status(409).json({
+        status: "fail",
+        message: "This payout request cannot be processed right now",
+      });
+    }
+    if (isUniqueError(error)) {
+      return res.status(409).json({
+        status: "fail",
+        message: "This bank transfer reference has already been used",
+      });
+    }
+    console.error("Process payment failed:", error);
     return res
       .status(500)
       .json({ status: "error", message: "Something went wrong" });

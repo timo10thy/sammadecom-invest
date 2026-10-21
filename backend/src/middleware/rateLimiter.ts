@@ -211,3 +211,17 @@ export const revealBankDetailsLimiter = rateLimit({
     message: "Too many requests, please try again later",
   },
 });
+
+//financie payment
+export const processPaymentLimiter = rateLimit({
+  windowMs: 60 * MINUTE,
+  limit: 100,
+  standardHeaders: "draft-8",
+  legacyHeaders: false,
+  keyGenerator: (req: Request): string =>
+    req.user?.userId ?? ipKeyGenerator(req.ip ?? ""),
+  message: {
+    status: "fail",
+    message: "Too many requests, please try again later",
+  },
+});
