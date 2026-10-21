@@ -6,6 +6,7 @@ import {
 import {
   createPaymentLimiter,
   listPaymentsLimiter,
+  processPaymentLimiter,
   reviewPaymentLimiter,
   revealBankDetailsLimiter,
 } from "../../middleware/rateLimiter.js";
@@ -13,6 +14,7 @@ import {
   createPayment,
   getPaymentBankDetails,
   listPayments,
+  processPayment,
   reviewPayment,
 } from "./paymentsController.js";
 
@@ -48,4 +50,12 @@ paymentsRouter.patch(
   authorizeRoles("MANAGEMENT"),
   reviewPaymentLimiter,
   reviewPayment
+);
+
+paymentsRouter.patch(
+  "/:paymentId/process",
+  authenticate,
+  authorizeRoles("FINANCE"),
+  processPaymentLimiter,
+  processPayment
 );
