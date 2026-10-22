@@ -225,3 +225,17 @@ export const processPaymentLimiter = rateLimit({
     message: "Too many requests, please try again later",
   },
 });
+
+//auditlog
+export const auditLogsLimiter = rateLimit({
+  windowMs: 15 * MINUTE,
+  limit: 60,
+  standardHeaders: "draft-8",
+  legacyHeaders: false,
+  keyGenerator: (req: Request): string =>
+    req.user?.userId ?? ipKeyGenerator(req.ip ?? ""),
+  message: {
+    status: "fail",
+    message: "Too many requests, please try again later",
+  },
+});
