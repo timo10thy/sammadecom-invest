@@ -12,6 +12,7 @@ enum Role {
   STAFF
   FINANCE
   MANAGEMENT
+  SYSTEM
 }
 
 enum InvestmentStatus {
