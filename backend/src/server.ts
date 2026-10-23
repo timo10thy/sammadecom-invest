@@ -10,6 +10,7 @@ import { investorsRouter } from "./modules/investors/investorsRoutes.js";
 import { investmentsRouter } from "./modules/investments/investmentsRoutes.js";
 import { paymentsRouter } from "./modules/payments/paymentsRoutes.js";
 import { auditLogsRouter } from "./modules/audit/auditLogsRoutes.js";
+import { startMaturityJob } from "./jobs/maturityJob.js";
 const app = express();
 
 app.use(helmet());
@@ -44,4 +45,5 @@ const PORT = process.env.PORT || 5001;
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
   startTokenCleanupJob();
+  startMaturityJob();
 });
