@@ -105,7 +105,7 @@ export const loginUser = async (req: Request, res: Response) => {
       user ? user.passwordHash : DUMMY_HASH
     );
 
-    if (!user || !passwordMatches) {
+    if (!user || user.role === "SYSTEM" || !passwordMatches) {
       return res
         .status(401)
         .json({ status: "fail", message: "Invalid email or password" });
