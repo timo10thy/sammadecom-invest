@@ -799,3 +799,116 @@ export const listDueInvestments = async (req: Request, res: Response) => {
       .json({ status: "error", message: "Something went wrong" });
   }
 };
+
+//investors see their investment
+const INVESTOR_VISIBLE_STATUSES = ["ACTIVE", "MATURED", "PAID"] as const;
+type InvestorVisibleStatus = (typeof INVESTOR_VISIBLE_STATUSES)[number];
+
+const isInvestorVisibleStatus = (
+  value: unknown
+): value is InvestorVisibleStatus =>
+  typeof value === "string" &&
+  (INVESTOR_VISIBLE_STATUSES as readonly string[]).includes(value);
+
+// investor sees only their own approved investments
+export const listMyInvestments = async (req: Request, res: Response) => {
+  try {
+    const userId = req.user?.userId;
+    if (!userId) {
+      return res
+        .status(401)
+        .json({ status: "fail", message: "Invalid or expired token" });
+    }
+
+    let statuses: InvestorVisibleStatus[] = [...INVESTOR_VISIBLE_STATUSES];
+    const rawStatus = req.query["status"];
+    if (rawStatus !== undefined) {
+      if (!isInvestorVisibleStatus(rawStatus)) {
+        return res.status(400).json({
+          status: "fail",
+          message: "Status must be ACTIVE, MATURED or PAID",
+        });
+      }
+      statuses = [rawStatus];
+    }
+
+    let page = 1;
+    const rawPage = req.query["page"];
+    if (rawPage !== undefined) {
+      const parsed = parseWholeNumber(rawPage);
+      if (parsed === null) {
+        return res.status(400).json({
+          status: "fail",
+          message: "Page must be a whole number above 0",
+        });
+      }
+      page = parsed;
+    }
+
+    let limit = 20;
+    const rawLimit = req.query["limit"];
+    if (rawLimit !== undefined) {
+      const parsed = parseWholeNumber(rawLimit);
+      if (parsed === null) {
+        return res.status(400).json({
+          status: "fail",
+          message: "Limit must be a whole number above 0",
+        });
+      }
+      limit = Math.min(parsed, 50);
+    }
+
+    // the investor is found from the token, never from the request
+    const where = {
+      investor: { userId },
+      status: { in: statuses },
+    };
+
+    const [total, rows] = await Promise.all([
+      prisma.investment.count({ where }),
+      prisma.investment.findMany({
+        where,
+        orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+        skip: (page - 1) * limit,
+        take: limit,
+        select: {
+          id: true,
+          planName: true,
+          amount: true,
+          roiPercent: true,
+          status: true,
+          startDate: true,
+          maturityDate: true,
+        },
+      }),
+    ]);
+
+    const investments = rows.map((row) => {
+      const amountText = row.amount.toFixed(2);
+      const principalCents = amountToCents(amountText);
+      const returnCents = calculateReturnCents(
+        amountText,
+        row.roiPercent.toFixed(2)
+      );
+      return {
+        id: row.id,
+        planName: row.planName,
+        amount: centsToText(principalCents),
+        totalAtMaturity: centsToText(principalCents + returnCents),
+        status: row.status,
+        startDate: row.startDate,
+        maturityDate: row.maturityDate,
+      };
+    });
+
+    return res.status(200).json({
+      status: "success",
+      data: { investments, total, page, limit },
+    });
+  } catch (error) {
+    console.error("List my investments failed:", error);
+    return res
+      .status(500)
+      .json({ status: "error", message: "Something went wrong" });
+  }
+};

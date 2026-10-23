@@ -14,9 +14,9 @@ import {
   createInvestments,
   listDueInvestments,
   listInvestments,
+  listMyInvestments,
   reviewInvestment,
 } from "./investmentsController.js";
-
 export const investmentsRouter = Router();
 
 investmentsRouter.get(
@@ -33,6 +33,14 @@ investmentsRouter.get(
   authorizeRoles("FINANCE", "MANAGEMENT"),
   listInvestmentsLimiter,
   listDueInvestments
+);
+
+investmentsRouter.get(
+  "/me",
+  authenticate,
+  authorizeRoles("INVESTOR"),
+  listInvestmentsLimiter,
+  listMyInvestments
 );
 
 investmentsRouter.post(
