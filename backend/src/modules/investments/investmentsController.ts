@@ -432,7 +432,7 @@ export const reviewInvestment = async (req: Request, res: Response) => {
         });
         updatedCount = result.count;
       } else if (action === "RETURN") {
-        //  Finance check is cleared
+        //  Finance check is cleared audit role
         const result = await tx.investment.updateMany({
           where,
           data: {
@@ -461,6 +461,7 @@ export const reviewInvestment = async (req: Request, res: Response) => {
           action: REVIEW_AUDIT_ACTION[action],
           entityType: "Investment",
           entityId: investment.id,
+          details: cleanReason === null ? null : `reason: ${cleanReason}`,
         },
       });
 
