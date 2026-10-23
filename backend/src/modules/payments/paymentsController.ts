@@ -699,3 +699,89 @@ export const processPayment = async (req: Request, res: Response) => {
       .json({ status: "error", message: "Something went wrong" });
   }
 };
+
+//payment status
+const INVESTOR_VISIBLE_PAYMENT_STATUSES = [
+  "PENDING_APPROVAL",
+  "APPROVED",
+  "PROCESSED",
+] as const;
+
+// investor sees only their own payouts, never rejected ones
+export const listMyPayments = async (req: Request, res: Response) => {
+  try {
+    const userId = req.user?.userId;
+    if (!userId) {
+      return res
+        .status(401)
+        .json({ status: "fail", message: "Invalid or expired token" });
+    }
+
+    let page = 1;
+    const rawPage = req.query["page"];
+    if (rawPage !== undefined) {
+      const parsed = parseWholeNumber(rawPage);
+      if (parsed === null) {
+        return res.status(400).json({
+          status: "fail",
+          message: "Page must be a whole number above 0",
+        });
+      }
+      page = parsed;
+    }
+
+    let limit = 20;
+    const rawLimit = req.query["limit"];
+    if (rawLimit !== undefined) {
+      const parsed = parseWholeNumber(rawLimit);
+      if (parsed === null) {
+        return res.status(400).json({
+          status: "fail",
+          message: "Limit must be a whole number above 0",
+        });
+      }
+      limit = Math.min(parsed, 50);
+    }
+
+    // the investor is found from the token, never from the request
+    const where = {
+      status: { in: [...INVESTOR_VISIBLE_PAYMENT_STATUSES] },
+      investment: { investor: { userId } },
+    };
+
+    const [total, rows] = await Promise.all([
+      prisma.payment.count({ where }),
+      prisma.payment.findMany({
+        where,
+        orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+        skip: (page - 1) * limit,
+        take: limit,
+        select: {
+          id: true,
+          amount: true,
+          status: true,
+          processedAt: true,
+          investment: { select: { planName: true } },
+        },
+      }),
+    ]);
+
+    const payments = rows.map((row) => ({
+      id: row.id,
+      planName: row.investment.planName,
+      amount: centsToText(amountToCents(row.amount.toFixed(2))),
+      status: row.status,
+      paidAt: row.status === "PROCESSED" ? row.processedAt : null,
+    }));
+
+    return res.status(200).json({
+      status: "success",
+      data: { payments, total, page, limit },
+    });
+  } catch (error) {
+    console.error("List my payments failed:", error);
+    return res
+      .status(500)
+      .json({ status: "error", message: "Something went wrong" });
+  }
+};

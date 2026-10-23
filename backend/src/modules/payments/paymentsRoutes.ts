@@ -13,6 +13,7 @@ import {
 import {
   createPayment,
   getPaymentBankDetails,
+  listMyPayments,
   listPayments,
   processPayment,
   reviewPayment,
@@ -26,6 +27,14 @@ paymentsRouter.get(
   authorizeRoles("FINANCE", "MANAGEMENT"),
   listPaymentsLimiter,
   listPayments
+);
+
+paymentsRouter.get(
+  "/me",
+  authenticate,
+  authorizeRoles("INVESTOR"),
+  listPaymentsLimiter,
+  listMyPayments
 );
 
 paymentsRouter.post(
